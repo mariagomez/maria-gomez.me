@@ -1,12 +1,15 @@
 require "rubygems"
 require "bundler/setup"
 require "stringex"
+require "tmpdir"
 
 ## -- Config -- ##
 
 posts_dir       = "_posts"    # directory for blog files
 new_post_ext    = "md"  # default new post file extension when using the new_post task
 new_page_ext    = "md"  # default new page file extension when using the new_page task
+
+GITHUB_REPONAME = "mariagomez/maria-gomez.me"
 
 
 #############################
@@ -74,6 +77,20 @@ task :new_page, :title do |t, args|
     page.puts "---"
   end
 end
+
+desc "Generate and publish blog to gh-pages"
+  task :publish do
+    Dir.mktmpdir do |tmp|
+      cp_r "_site/.", tmp
+      Dir.chdir tmp
+      system "git init"
+      system "git add ."
+      message = "Site updated at #{Time.now.utc}"
+      system "git commit -m #{message.inspect}"
+      system "git remote add origin git@github.com:#{GITHUB_REPONAME}.git"
+      system "git push origin master:refs/heads/gh-pages --force"
+    end
+  end
 
 def get_stdin(message)
   print message
