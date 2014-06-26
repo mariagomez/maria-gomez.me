@@ -80,11 +80,11 @@ end
 
 desc "Build the site"
 task :generate do
-  execute("jekyll build")
+  exec("jekyll build")
 end
 
 desc "Generate and publish blog to gh-pages"
-task :publish => [:generate] do
+task :publish do
   Dir.mktmpdir do |tmp|
     cp_r "_site/.", tmp
     Dir.chdir tmp

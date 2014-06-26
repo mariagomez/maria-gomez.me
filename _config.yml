@@ -1,7 +1,8 @@
 title:            Maria Gomez
 description:      Continuous Learner.
 # Your site's domain goes here. Leave localhost server or blank when working locally.
-url:              http://localtest.me:4000 #http://mariagomez.github.io/maria-gomez.me/
+# url:              http://localtest.me:4000 #http://mariagomez.github.io/maria-gomez.me/
+url:              http://mariagomez.github.io/maria-gomez.me
 disqus_shortname:
 
 # Owner/author information

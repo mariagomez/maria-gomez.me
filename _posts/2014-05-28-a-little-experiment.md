@@ -2,7 +2,7 @@
 layout: post
 title: "A Little Experiment"
 modified: 2014-05-28 22:03:43 -0400
-category: [Experiment]
+category: general
 tags: [experiement, introduction, notes, thoughts]
 comments:
 share:
