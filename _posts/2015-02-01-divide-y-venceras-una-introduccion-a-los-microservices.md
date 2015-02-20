@@ -12,6 +12,9 @@ comments:
 share:
 ---
 
+<strong>Nota: For the English version of this article, please go  [here](http://maria-gomez.me/talks/divide-and-conquer-an-introduction-to-microservices/)</strong>
+
+<br/>
 La semana pasada [Thoughtworks Ecuador](http://www.thoughtworks.com/es) retomó sus sesiones mensuales de tecnología (conocidas como Noches Geek) bajo un nuevo nombre: [ComparTI / Tech Stage](http://info.thoughtworks.com/ComparTI-Quito-Enero_Registration-Page.html). En esta ocasión tuve la oportunidad de dar una charla sobre una de las prácticas más de moda en el mundo del desarrollo de software: los microservicios.
 <br/><br/>
 El evento tuvo bastante acogida y después de mi presentación el público asistente tuvo la oportunidad de dar su opinión y preguntar sus dudas, lo que hizo que tuviésemos muy buenas conversaciones para cerrar el evento.
