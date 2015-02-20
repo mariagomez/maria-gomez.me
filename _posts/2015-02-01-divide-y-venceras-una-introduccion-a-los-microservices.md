@@ -21,7 +21,7 @@ Hubo quien se interesó por saber más del tema, por lo que a continuación dejo
   * [Post en el blog de Martin Fowler](http://martinfowler.com/articles/microservices.html) (co-escrito con James Lewis) sobre microservicios.
   * [Artículo en InfoQ](http://www.infoq.com/news/2007/07/soa-ws-relation) que explica la diferencia entre SOA y Web Services.
   * Para saber más del concepto [You build it, you run it](https://www.safaribooksonline.com/library/view/programming-amazon-ec2/9781449303617/ch01s03.html)
-  * También en el blog de Martin Fowler: [Como escribir pruebas en un ambiente de microservicios](https://www.safaribooksonline.com/library/view/programming-amazon-ec2/9781449303617/ch01s03.html)
+  * También en el blog de Martin Fowler: [Como escribir pruebas en un ambiente de microservicios](http://martinfowler.com/articles/microservice-testing/)
   * [Post de Paul Hammant](http://paulhammant.com/2014/12/07/moniliths-cookiecutters-or-microservices/) sobre monolíticos, microservicios y cookie-cutter
   * Algunas lecciones aprendidas después de trabajar con microservicios en los [Insights de Thoughtworks](http://www.thoughtworks.com/insights/blog/microservices-lessons-frontline)
   * [Una muestra gratuita](http://nginx.com/resources/library/oreilly-building-microservices/) del libro de Sam Newman "Building Microservices".
@@ -31,7 +31,5 @@ Muchos me preguntaron al final si iba a publicar la presentación, así que para
 <br/><br/>
 
 <div style="text-align:center;">
-
-  <iframe src="//www.slideshare.net/slideshow/embed_code/44137174" width="476" height="400" frameborder="0" marginwidth="0" marginheight="0" scrolling="no"></iframe>
-
+  <iframe src="//www.slideshare.net/slideshow/embed_code/44914497" width="425" height="355" frameborder="0" marginwidth="0" marginheight="0" scrolling="no" style="border:1px solid #CCC; border-width:1px; margin-bottom:5px; max-width: 100%;" allowfullscreen> </iframe> <div style="margin-bottom:5px"> <strong> <a href="//www.slideshare.net/ThoughtWorks/microservicios" title="Divide y Vencerás: introducción a los Microservicios" target="_blank">Divide y Vencerás: introducción a los Microservicios</a> </strong> from <strong><a href="//www.slideshare.net/ThoughtWorks" target="_blank">ThoughtWorks</a></strong> </div>
 </div>

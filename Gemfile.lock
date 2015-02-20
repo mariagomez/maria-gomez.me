@@ -126,7 +126,7 @@ PLATFORMS
 DEPENDENCIES
   activesupport
   coderay
-  github-pages (= 28)
+  github-pages
   json
   rake
   stringex
