@@ -199,4 +199,4 @@ public class ExampleApplication extends Application<ExampleConfiguration> {
 And you should be good to go!
 <br/><br/>
 
-PS: I have started a project on github to put this together. Come and have a look!
+PS: All the code plus an example is in [this project on github](https://github.com/mariagomez/dropwizard-audit). Contribution are more than welcome.
