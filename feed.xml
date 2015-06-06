@@ -1,0 +1,487 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en">
+<title type="text">Continuous Learner</title>
+<generator uri="https://github.com/jekyll/jekyll">Jekyll</generator>
+<link rel="self" type="application/atom+xml" href="http://maria-gomez.me//feed.xml" />
+<link rel="alternate" type="text/html" href="http://maria-gomez.me/" />
+<updated>2015-06-06T14:14:56-04:00</updated>
+<id>http://maria-gomez.me//</id>
+<author>
+  <name>Maria Gomez</name>
+  <uri>http://maria-gomez.me//</uri>
+  <email>mariagomez.aguirre@gmail.com</email>
+</author>
+
+
+<entry>
+  <title type="html"><![CDATA[How to log audit information with Dropwizard]]></title>
+  <link rel="alternate" type="text/html" href="http://maria-gomez.me//software/how-to-log-audit-information-with-dropwizard/" />
+  <id>http://maria-gomez.me//software/how-to-log-audit-information-with-dropwizard</id>
+  <updated>2015-06-04 07:30:37 -0400T00:00:00-00:00</updated>
+  <published>2015-06-04T00:00:00-04:00</published>
+  
+  <author>
+    <name>Maria Gomez</name>
+    <uri>http://maria-gomez.me/</uri>
+    <email>mariagomez.aguirre@gmail.com</email>
+  </author>
+  <content type="html">&lt;p&gt;For those who don’t know, &lt;a href=&quot;dropwizard.github.io/dropwizard/&quot;&gt;Dropwizard&lt;/a&gt; is Java framework that allows you to build light-weight RESTful webservices. It comes with a few functionalities already configured and ready to use like an embedded Jetty container and the &lt;a href=&quot;https://jersey.java.net/&quot;&gt;Jersey&lt;/a&gt; framework for building webservices. It also allows you to add more functionality as you need by importing or creating &lt;i&gt;&lt;a href=&quot;https://dropwizard.github.io/dropwizard/manual/core.html#bundles&quot;&gt;bundles&lt;/a&gt;&lt;/i&gt;. This framework is currently very popular among the Java community and it’s being used as an alternative of the much heavier enterprise options. The &lt;a href=&quot;http://www.thoughtworks.com/radar/languages-and-frameworks/dropwizard&quot;&gt;Thoughtworks Tech Radar&lt;/a&gt; shows it on the Adopt ring, meaning we promote and recommend its use. In our project we are using Dropwizard to build a set of microservices that are consumed by a single page app.
+&lt;br /&gt;&lt;br /&gt;
+Although it has a really active community and it’s improving pretty fast, the framework is not mature yet and therefore there are some functionalities or requirements that are not available out of the box. One of them is the &lt;a href=&quot;http://en.wikipedia.org/wiki/Audit_trail&quot;&gt;audit trail&lt;/a&gt;, that is, keeping a record of the transactions done by the users in the system that is not intrusive for them and respect their sensitive information. When we talk about webservices, we can try a few approaches:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Log at the persistence layer. When there is a change in any table or entity you can trigger a procedure that will record the change. Hibernate has something called &lt;a href=&quot;http://envers.jboss.org/&quot;&gt;Envers&lt;/a&gt; that at first seems like an easy way to do this but we could not make it work as we were not using J2EE and the library is only available as part of the enterprise package . Another reason not to go down this path is that there doesn’t seem to be a way of separating the audit tables from the normal tables so the database can grow really quickly and there may be some performance issues related to that.
+  &lt;br /&gt;&lt;br /&gt;&lt;/li&gt;
+  &lt;li&gt;Log using DB hooks or interceptors that get called when the DB is about to get modified.
+  &lt;br /&gt;&lt;br /&gt;&lt;/li&gt;
+  &lt;li&gt;Log at the resource level. When a request came to the server, log the content of it as well as the additional information you need. Jersey allows you to easily register MethodDispatcher that will decorate your resources with new functionality. I did some research in the DW mailing list and found this &lt;a href=&quot;https://gist.github.com/ryankennedy/6688601&quot;&gt;gist&lt;/a&gt;, which gave the confirmation and inspiration we needed to follow this path.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;creating-the-audit-bundle-in-dw&quot;&gt;Creating the audit bundle in DW&lt;/h3&gt;
+
+&lt;p&gt;Creating a dispatcher is easy enough, our looks like this:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-java&quot; data-lang=&quot;java&quot;&gt;&lt;span class=&quot;lineno&quot;&gt; 1&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;package&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;me&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;mariagomez&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;dropwizard&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;audit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 2&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt; 3&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;com.fasterxml.jackson.core.JsonProcessingException&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 4&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;com.fasterxml.jackson.databind.ObjectMapper&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 5&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;com.sun.jersey.api.core.HttpContext&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 6&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;com.sun.jersey.spi.dispatch.RequestDispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 7&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.jackson.Jackson&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 8&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;me.mariagomez.dropwizard.audit.providers.PrincipalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 9&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;org.joda.time.DateTime&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;10&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;org.slf4j.Logger&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;11&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;org.slf4j.LoggerFactory&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;12&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;13&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;static&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;me&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;mariagomez&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;dropwizard&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;audit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;Constants&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;X_REMOTE_ADDR&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;14&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;15&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;AuditRequestDispatcher&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;implements&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;RequestDispatcher&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;16&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;17&lt;/span&gt;   &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;static&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;final&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ObjectMapper&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MAPPER&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Jackson&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;newObjectMapper&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;();&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;18&lt;/span&gt;   &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;static&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;final&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Logger&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;LOGGER&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;LoggerFactory&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getLogger&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;AuditRequestDispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;class&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;19&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;20&lt;/span&gt;   &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;RequestDispatcher&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;21&lt;/span&gt;   &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;AuditWriter&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;22&lt;/span&gt;   &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;PrincipalProvider&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;23&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;24&lt;/span&gt;   &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;AuditRequestDispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;RequestDispatcher&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;AuditWriter&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;25&lt;/span&gt;                             &lt;span class=&quot;n&quot;&gt;PrincipalProvider&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;26&lt;/span&gt;     &lt;span class=&quot;k&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;dispatcher&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;27&lt;/span&gt;     &lt;span class=&quot;k&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;auditWriter&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;28&lt;/span&gt;     &lt;span class=&quot;k&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;principalProvider&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;29&lt;/span&gt;   &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;30&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;31&lt;/span&gt;   &lt;span class=&quot;nd&quot;&gt;@Override&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;32&lt;/span&gt;   &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;dispatch&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Object&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;resource&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;HttpContext&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;context&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;33&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;dispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;dispatch&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;resource&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;context&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;34&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;35&lt;/span&gt;     &lt;span class=&quot;kt&quot;&gt;int&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;responseCode&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;context&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getResponse&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getStatus&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;();&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;36&lt;/span&gt;     &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;responseCode&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;200&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;||&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;responseCode&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;299&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;37&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;38&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;39&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;String&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;method&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;context&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getRequest&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getMethod&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;();&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;40&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;String&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;path&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;context&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getRequest&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getPath&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;();&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;41&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;String&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;remoteAddress&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;context&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getRequest&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getRequestHeaders&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getFirst&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;X_REMOTE_ADDR&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;42&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;String&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;username&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getUsername&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;();&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;43&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;DateTime&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;date&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;DateTime&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;now&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;();&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;44&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;45&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;String&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;entity&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;kc&quot;&gt;null&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;46&lt;/span&gt;     &lt;span class=&quot;k&quot;&gt;try&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;47&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;entity&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MAPPER&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;writeValueAsString&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;context&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getResponse&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getEntity&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;());&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;48&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;catch&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;JsonProcessingException&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;e&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;49&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;LOGGER&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;error&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&amp;quot;Error while parsing the entity. \n Message: &amp;quot;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;e&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getMessage&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;());&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;50&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;51&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;52&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;AuditInfo&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditInfo&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;AuditInfo&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;method&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;responseCode&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;date&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;entity&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;path&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;remoteAddress&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;username&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;53&lt;/span&gt;     &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;write&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;auditInfo&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;54&lt;/span&gt;   &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;55&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;As you can see, we let the dispatcher’s flow continue and we insert our logic after the request has been processed. This is because we only want to audit the successful requests. We also have a PrincipalProvider injected as a dependency, this gives us the info about the user making the request.
+&lt;br /&gt;&lt;br /&gt;
+Next we attach this dispatcher to the resource by using a Provider:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-java&quot; data-lang=&quot;java&quot;&gt;&lt;span class=&quot;lineno&quot;&gt; 1&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;package&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;me&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;mariagomez&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;dropwizard&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;audit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 2&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt; 3&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;com.sun.jersey.api.model.AbstractResourceMethod&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 4&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;com.sun.jersey.spi.container.ResourceMethodDispatchProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 5&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;com.sun.jersey.spi.dispatch.RequestDispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 6&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;me.mariagomez.dropwizard.audit.providers.PrincipalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 7&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt; 8&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;java.util.Arrays&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 9&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;java.util.List&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;10&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;11&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;AuditMethodDispatchProvider&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;implements&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ResourceMethodDispatchProvider&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;12&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;13&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;static&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;final&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;List&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;String&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;AUDITABLE_METHODS&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Arrays&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;asList&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&amp;quot;POST&amp;quot;&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&amp;quot;PUT&amp;quot;&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&amp;quot;DELETE&amp;quot;&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;14&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ResourceMethodDispatchProvider&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;provider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;15&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;AuditWriter&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;16&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;PrincipalProvider&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;17&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;18&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;AuditMethodDispatchProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ResourceMethodDispatchProvider&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;provider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;AuditWriter&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;19&lt;/span&gt;                                        &lt;span class=&quot;n&quot;&gt;PrincipalProvider&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;20&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;provider&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;provider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;21&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;auditWriter&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;22&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;principalProvider&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;23&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;24&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;25&lt;/span&gt;     &lt;span class=&quot;nd&quot;&gt;@Override&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;26&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;RequestDispatcher&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;create&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;AbstractResourceMethod&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;abstractResourceMethod&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;27&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;RequestDispatcher&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;requestDispatcher&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;provider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;create&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;abstractResourceMethod&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;28&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;isMethodAuditable&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;abstractResourceMethod&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getHttpMethod&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;())){&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;29&lt;/span&gt;             &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;AuditRequestDispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;requestDispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;30&lt;/span&gt;         &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;31&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;requestDispatcher&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;32&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;33&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;34&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;boolean&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;isMethodAuditable&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;String&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;method&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;35&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;AUDITABLE_METHODS&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;contains&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;method&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;36&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;37&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;38&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;In our case, we wanted the dispatcher to be attached to all resources with POST, PUT and DELETE verbs, but the &lt;a href=&quot;https://gist.github.com/ryankennedy/6688601&quot;&gt;gist&lt;/a&gt; I mentioned before shows how to do this by using an annotation instead.
+&lt;br /&gt;&lt;br /&gt;
+Once we have all this in place, we just need to create the bundle so we can use this functionality within our application. Bundles in Dropwizard can have access to the configuration files so we took advantage of that to allow different writers (initially we only used the normal logs but you can link to a writer that send the data somewhere else).&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-java&quot; data-lang=&quot;java&quot;&gt;&lt;span class=&quot;lineno&quot;&gt; 1&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;package&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;me&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;mariagomez&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;dropwizard&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;audit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 2&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt; 3&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.Configuration&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 4&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.ConfiguredBundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 5&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.jersey.setup.JerseyEnvironment&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 6&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.setup.Bootstrap&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 7&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.setup.Environment&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 8&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;me.mariagomez.dropwizard.audit.filters.RemoteAddressFilter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 9&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;me.mariagomez.dropwizard.audit.providers.PrincipalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;10&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;11&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;AuditBundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;T&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;extends&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Configuration&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;implements&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConfiguredBundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;T&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;12&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;13&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;AuditWriter&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;14&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;private&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;PrincipalProvider&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;15&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;16&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;AuditBundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;AuditWriter&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;PrincipalProvider&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;17&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;auditWriter&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;18&lt;/span&gt;         &lt;span class=&quot;k&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;principalProvider&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;19&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;20&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;21&lt;/span&gt;     &lt;span class=&quot;nd&quot;&gt;@Override&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;22&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;run&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;T&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;configuration&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Environment&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;environment&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;23&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;JerseyEnvironment&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;jersey&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;environment&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;jersey&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;();&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;24&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;jersey&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;register&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;AuditMethodDispatchAdapter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;auditWriter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;principalProvider&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;));&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;25&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;jersey&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getResourceConfig&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;getContainerRequestFilters&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;add&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;RemoteAddressFilter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;());&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;26&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;27&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;28&lt;/span&gt;     &lt;span class=&quot;nd&quot;&gt;@Override&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;29&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;initialize&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Bootstrap&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;?&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;bootstrap&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;30&lt;/span&gt;         &lt;span class=&quot;c1&quot;&gt;// Do nothing&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;31&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;32&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;Finally, you need to register the bundle in your application:&lt;/p&gt;
+
+&lt;div class=&quot;highlight&quot;&gt;&lt;pre&gt;&lt;code class=&quot;language-java&quot; data-lang=&quot;java&quot;&gt;&lt;span class=&quot;lineno&quot;&gt; 1&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;package&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;me&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;mariagomez&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;dropwizard&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;audit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;example&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 2&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt; 3&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.Application&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 4&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.setup.Bootstrap&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 5&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;io.dropwizard.setup.Environment&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 6&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;me.mariagomez.dropwizard.audit.AuditBundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 7&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt; 8&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;ExampleApplication&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;extends&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Application&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ExampleConfiguration&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt; 9&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;10&lt;/span&gt;     &lt;span class=&quot;nd&quot;&gt;@Override&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;11&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;initialize&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Bootstrap&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ExampleConfiguration&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;bootstrap&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;12&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;AuditBundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ExampleConfiguration&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;gt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;bundle&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;AuditBundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;&amp;lt;&amp;gt;(&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;PrincipalProviderImpl&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;());&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;13&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;bootstrap&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;addBundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;bundle&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;14&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;15&lt;/span&gt; 
+&lt;span class=&quot;lineno&quot;&gt;16&lt;/span&gt;     &lt;span class=&quot;nd&quot;&gt;@Override&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;17&lt;/span&gt;     &lt;span class=&quot;kd&quot;&gt;public&lt;/span&gt; &lt;span class=&quot;kt&quot;&gt;void&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;run&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ExampleConfiguration&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;configuration&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Environment&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;environment&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;kd&quot;&gt;throws&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Exception&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;{&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;18&lt;/span&gt;         &lt;span class=&quot;n&quot;&gt;environment&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;jersey&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;().&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;register&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ExampleResource&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;na&quot;&gt;class&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;);&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;19&lt;/span&gt;     &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;lineno&quot;&gt;20&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;}&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+
+&lt;p&gt;And you should be good to go!
+&lt;br /&gt;&lt;br /&gt;
+PS: All the code plus an example is in &lt;a href=&quot;https://github.com/mariagomez/dropwizard-audit&quot;&gt;this project on github&lt;/a&gt;. Contribution are more than welcome.&lt;/p&gt;
+
+  &lt;p&gt;&lt;a href=&quot;http://maria-gomez.me//software/how-to-log-audit-information-with-dropwizard/&quot;&gt;How to log audit information with Dropwizard&lt;/a&gt; was originally published by Maria Gomez at &lt;a href=&quot;http://maria-gomez.me/&quot;&gt;Continuous Learner&lt;/a&gt; on June 04, 2015.&lt;/p&gt;</content>
+</entry>
+
+
+<entry>
+  <title type="html"><![CDATA[Divide and Conquer - an introduction to Microservices]]></title>
+  <link rel="alternate" type="text/html" href="http://maria-gomez.me//talks/divide-and-conquer-an-introduction-to-microservices/" />
+  <id>http://maria-gomez.me//talks/divide-and-conquer-an-introduction-to-microservices</id>
+  <updated>2015-02-20 09:26:46 -0500T00:00:00-00:00</updated>
+  <published>2015-02-20T00:00:00-05:00</published>
+  
+  <author>
+    <name>Maria Gomez</name>
+    <uri>http://maria-gomez.me/</uri>
+    <email>mariagomez.aguirre@gmail.com</email>
+  </author>
+  <content type="html">&lt;p&gt;&lt;strong&gt;Note: For the Spanish version of this article, please go  &lt;a href=&quot;http://maria-gomez.me/talks/divide-y-venceras-una-introduccion-a-los-microservices/&quot;&gt;here&lt;/a&gt;&lt;/strong&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;br /&gt;
+Last month &lt;a href=&quot;http://www.thoughtworks.com/es&quot;&gt;Thoughtworks Ecuador&lt;/a&gt; relaunched their monthly tech meetups (known as Geek Nights) with a new name: &lt;a href=&quot;http://info.thoughtworks.com/ComparTI-Quito-Enero_Registration-Page.html&quot;&gt;ComparTI / Tech Stage&lt;/a&gt;. In this first one I had the opportunity to talk about one of the trendiest practice in software development: microservices.
+&lt;br /&gt;&lt;br /&gt;&lt;/p&gt;
+
+&lt;p&gt;The event was quite a success! During and after the presentation the audience had the chance to talk about their experiences and ask their questions, which lead to a few really good conversations that helped us closing the evening on a good note.
+&lt;br /&gt;&lt;br /&gt;&lt;/p&gt;
+
+&lt;p&gt;Some people asked me extra resources that they could use to know more about the subject, so below you can find some links and books related to what we talked in the session:&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;a href=&quot;http://martinfowler.com/articles/microservices.html&quot;&gt;Post in Martin Fowler’s blog&lt;/a&gt; (with James Lewis) about microservices.&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;http://www.infoq.com/news/2007/07/soa-ws-relation&quot;&gt;Article in InfoQ&lt;/a&gt; that explains the difference between SOA &amp;amp; Web Services.&lt;/li&gt;
+  &lt;li&gt;More about the concept &lt;a href=&quot;https://www.safaribooksonline.com/library/view/programming-amazon-ec2/9781449303617/ch01s03.html&quot;&gt;You build it, you run it&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;Also in Martin Fowler’s blog: &lt;a href=&quot;http://martinfowler.com/articles/microservice-testing/&quot;&gt;How to test microservices&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;http://paulhammant.com/2014/12/07/moniliths-cookiecutters-or-microservices/&quot;&gt;Post in Paul Hammant’s blog&lt;/a&gt; on monolithics, microservices &amp;amp; cookie-cutter.&lt;/li&gt;
+  &lt;li&gt;Some lessons learnt after working with microservices in the &lt;a href=&quot;http://www.thoughtworks.com/insights/blog/microservices-lessons-frontline&quot;&gt;Insights section of Thoughtworks&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;http://nginx.com/resources/library/oreilly-building-microservices/&quot;&gt;A free sample&lt;/a&gt; of Sam Newman’s book “Building Microservices”.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;br /&gt;&lt;br /&gt;&lt;/p&gt;
+
+&lt;div style=&quot;text-align:center;&quot;&gt;
+  &lt;iframe src=&quot;//www.slideshare.net/slideshow/embed_code/44914497&quot; width=&quot;425&quot; height=&quot;355&quot; frameborder=&quot;0&quot; marginwidth=&quot;0&quot; marginheight=&quot;0&quot; scrolling=&quot;no&quot; style=&quot;border:1px solid #CCC; border-width:1px; margin-bottom:5px; max-width: 100%;&quot; allowfullscreen=&quot;&quot;&gt; &lt;/iframe&gt; &lt;div style=&quot;margin-bottom:5px&quot;&gt; &lt;strong&gt; &lt;a href=&quot;//www.slideshare.net/ThoughtWorks/microservicios&quot; title=&quot;Divide y Vencerás: introducción a los Microservicios&quot; target=&quot;_blank&quot;&gt;Divide y Vencerás: introducción a los Microservicios&lt;/a&gt; &lt;/strong&gt; from &lt;strong&gt;&lt;a href=&quot;//www.slideshare.net/ThoughtWorks&quot; target=&quot;_blank&quot;&gt;ThoughtWorks&lt;/a&gt;&lt;/strong&gt; &lt;/div&gt;
+&lt;/div&gt;
+
+  &lt;p&gt;&lt;a href=&quot;http://maria-gomez.me//talks/divide-and-conquer-an-introduction-to-microservices/&quot;&gt;Divide and Conquer - an introduction to Microservices&lt;/a&gt; was originally published by Maria Gomez at &lt;a href=&quot;http://maria-gomez.me/&quot;&gt;Continuous Learner&lt;/a&gt; on February 20, 2015.&lt;/p&gt;</content>
+</entry>
+
+
+<entry>
+  <title type="html"><![CDATA[Divide y Vencerás - una introducción a los Microservices]]></title>
+  <link rel="alternate" type="text/html" href="http://maria-gomez.me//talks/divide-y-venceras-una-introduccion-a-los-microservices/" />
+  <id>http://maria-gomez.me//talks/divide-y-venceras-una-introduccion-a-los-microservices</id>
+  <updated>2015-02-01 18:05:09 -0500T00:00:00-00:00</updated>
+  <published>2015-02-01T00:00:00-05:00</published>
+  
+  <author>
+    <name>Maria Gomez</name>
+    <uri>http://maria-gomez.me/</uri>
+    <email>mariagomez.aguirre@gmail.com</email>
+  </author>
+  <content type="html">&lt;p&gt;&lt;strong&gt;Nota: For the English version of this article, please go  &lt;a href=&quot;http://maria-gomez.me/talks/divide-and-conquer-an-introduction-to-microservices/&quot;&gt;here&lt;/a&gt;&lt;/strong&gt;&lt;/p&gt;
+
+&lt;p&gt;&lt;br /&gt;
+La semana pasada &lt;a href=&quot;http://www.thoughtworks.com/es&quot;&gt;Thoughtworks Ecuador&lt;/a&gt; retomó sus sesiones mensuales de tecnología (conocidas como Noches Geek) bajo un nuevo nombre: &lt;a href=&quot;http://info.thoughtworks.com/ComparTI-Quito-Enero_Registration-Page.html&quot;&gt;ComparTI / Tech Stage&lt;/a&gt;. En esta ocasión tuve la oportunidad de dar una charla sobre una de las prácticas más de moda en el mundo del desarrollo de software: los microservicios.
+&lt;br /&gt;&lt;br /&gt;
+El evento tuvo bastante acogida y después de mi presentación el público asistente tuvo la oportunidad de dar su opinión y preguntar sus dudas, lo que hizo que tuviésemos muy buenas conversaciones para cerrar el evento.
+&lt;br /&gt;&lt;br /&gt;
+Hubo quien se interesó por saber más del tema, por lo que a continuación dejo una lista de enlaces y libros que están relacionados con lo que tratamos en la sesión (aparte de los que aparecen en la presentación):&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;a href=&quot;http://martinfowler.com/articles/microservices.html&quot;&gt;Post en el blog de Martin Fowler&lt;/a&gt; (co-escrito con James Lewis) sobre microservicios.&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;http://www.infoq.com/news/2007/07/soa-ws-relation&quot;&gt;Artículo en InfoQ&lt;/a&gt; que explica la diferencia entre SOA y Web Services.&lt;/li&gt;
+  &lt;li&gt;Para saber más del concepto &lt;a href=&quot;https://www.safaribooksonline.com/library/view/programming-amazon-ec2/9781449303617/ch01s03.html&quot;&gt;You build it, you run it&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;También en el blog de Martin Fowler: &lt;a href=&quot;http://martinfowler.com/articles/microservice-testing/&quot;&gt;Como escribir pruebas en un ambiente de microservicios&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;http://paulhammant.com/2014/12/07/moniliths-cookiecutters-or-microservices/&quot;&gt;Post de Paul Hammant&lt;/a&gt; sobre monolíticos, microservicios y cookie-cutter&lt;/li&gt;
+  &lt;li&gt;Algunas lecciones aprendidas después de trabajar con microservicios en los &lt;a href=&quot;http://www.thoughtworks.com/insights/blog/microservices-lessons-frontline&quot;&gt;Insights de Thoughtworks&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;http://nginx.com/resources/library/oreilly-building-microservices/&quot;&gt;Una muestra gratuita&lt;/a&gt; del libro de Sam Newman “Building Microservices”.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;br /&gt;&lt;br /&gt;
+Muchos me preguntaron al final si iba a publicar la presentación, así que para todos ellos aquí os la dejo :)
+&lt;br /&gt;&lt;br /&gt;&lt;/p&gt;
+
+&lt;div style=&quot;text-align:center;&quot;&gt;
+  &lt;iframe src=&quot;//www.slideshare.net/slideshow/embed_code/44914497&quot; width=&quot;425&quot; height=&quot;355&quot; frameborder=&quot;0&quot; marginwidth=&quot;0&quot; marginheight=&quot;0&quot; scrolling=&quot;no&quot; style=&quot;border:1px solid #CCC; border-width:1px; margin-bottom:5px; max-width: 100%;&quot; allowfullscreen=&quot;&quot;&gt; &lt;/iframe&gt; &lt;div style=&quot;margin-bottom:5px&quot;&gt; &lt;strong&gt; &lt;a href=&quot;//www.slideshare.net/ThoughtWorks/microservicios&quot; title=&quot;Divide y Vencerás: introducción a los Microservicios&quot; target=&quot;_blank&quot;&gt;Divide y Vencerás: introducción a los Microservicios&lt;/a&gt; &lt;/strong&gt; from &lt;strong&gt;&lt;a href=&quot;//www.slideshare.net/ThoughtWorks&quot; target=&quot;_blank&quot;&gt;ThoughtWorks&lt;/a&gt;&lt;/strong&gt; &lt;/div&gt;
+&lt;/div&gt;
+
+  &lt;p&gt;&lt;a href=&quot;http://maria-gomez.me//talks/divide-y-venceras-una-introduccion-a-los-microservices/&quot;&gt;Divide y Vencerás - una introducción a los Microservices&lt;/a&gt; was originally published by Maria Gomez at &lt;a href=&quot;http://maria-gomez.me/&quot;&gt;Continuous Learner&lt;/a&gt; on February 01, 2015.&lt;/p&gt;</content>
+</entry>
+
+
+<entry>
+  <title type="html"><![CDATA[Refactoring workshop]]></title>
+  <link rel="alternate" type="text/html" href="http://maria-gomez.me//talks/refactoring-workshop/" />
+  <id>http://maria-gomez.me//talks/refactoring-workshop</id>
+  <updated>2014-12-31 13:51:18 -0500T00:00:00-00:00</updated>
+  <published>2014-12-31T00:00:00-05:00</published>
+  
+  <author>
+    <name>Maria Gomez</name>
+    <uri>http://maria-gomez.me/</uri>
+    <email>mariagomez.aguirre@gmail.com</email>
+  </author>
+  <content type="html">&lt;p&gt;Last September in Quito I participated in [Campus Party](http://www.campus-party.org/), a tech conference in Quito (Ecuador). One of the sessions that I run was a workshop on refactoring techniques. It consisted on a 15 minutes presentation explaining some basic concepts like unit tests, SOLID principle and TDD and a 45 minutes of practice with some exercises.&lt;/p&gt;
+&lt;p&gt;&lt;br /&gt;&lt;/p&gt;
+&lt;p&gt;This type of workshop is supposed to be run on a 3 hours session but we only had 1 hour so we focus on two SOLID principles (single responsability and Open/Closed). I&#39;ll be posting a more details explanation of each of the principles but for now, here you have the presentations (both in Spanish and English).&lt;/p&gt;
+&lt;p&gt;&lt;br /&gt;&lt;/p&gt;
+
+&lt;iframe src=&quot;//www.slideshare.net/slideshow/embed_code/43120024&quot; width=&quot;476&quot; height=&quot;400&quot; frameborder=&quot;0&quot; marginwidth=&quot;0&quot; marginheight=&quot;0&quot; scrolling=&quot;no&quot;&gt;&lt;/iframe&gt;
+&lt;p&gt;English version&lt;/p&gt;
+&lt;p&gt;&lt;br /&gt;&lt;/p&gt;
+
+&lt;iframe src=&quot;//www.slideshare.net/slideshow/embed_code/43120131&quot; width=&quot;476&quot; height=&quot;400&quot; frameborder=&quot;0&quot; marginwidth=&quot;0&quot; marginheight=&quot;0&quot; scrolling=&quot;no&quot;&gt;&lt;/iframe&gt;
+&lt;p&gt;Spanish version&lt;/p&gt;
+
+  &lt;p&gt;&lt;a href=&quot;http://maria-gomez.me//talks/refactoring-workshop/&quot;&gt;Refactoring workshop&lt;/a&gt; was originally published by Maria Gomez at &lt;a href=&quot;http://maria-gomez.me/&quot;&gt;Continuous Learner&lt;/a&gt; on December 31, 2014.&lt;/p&gt;</content>
+</entry>
+
+
+<entry>
+  <title type="html"><![CDATA[Campus Party Quito 2014 - Evolutionary architecture]]></title>
+  <link rel="alternate" type="text/html" href="http://maria-gomez.me//talks/campus-party-quito-2014-evolutionary-architecture/" />
+  <id>http://maria-gomez.me//talks/campus-party-quito-2014-evolutionary-architecture</id>
+  <updated>2014-11-16 13:07:56 -0500T00:00:00-00:00</updated>
+  <published>2014-11-16T00:00:00-05:00</published>
+  
+  <author>
+    <name>Maria Gomez</name>
+    <uri>http://maria-gomez.me/</uri>
+    <email>mariagomez.aguirre@gmail.com</email>
+  </author>
+  <content type="html">&lt;p&gt;&lt;a href=&quot;http://www.campus-party.org/&quot;&gt;Campus Party&lt;/a&gt; is a “technology festival” lasting a week that aims to provide an environment that promotes creativity, innovation and digital entertainment. The main attractions are talks, workshop and a REALLY fast internet connection. The festival was first hosted in Spain 15 years ago and now has editions in countries in Europe and Latin America.
+&lt;br /&gt;&lt;br /&gt;
+My company (Thoughtworks) participated in this year &lt;a href=&quot;http://www.campus-party.com.ec/2014/index.html&quot;&gt;Ecuador edition&lt;/a&gt; that had as key speakers Karen M. Sandler and Julian Assange amongst others. We were in charge of the &lt;a href=&quot;http://www.campus-party.com.ec/2014/Coding_Zone_2014.html&quot;&gt;coding zone&lt;/a&gt; and we spent 3 days giving technical talks and encouraging people to learn more via hands-on workshops.
+&lt;br /&gt;&lt;br /&gt;
+One of the talks that I gave was on Evolutionary Architecture and how this approach can help building more robust and easier to change applications. My pair on the talk &lt;a href=&quot;http://faustodelatog.wordpress.com/2014/10/06/arquitecturas-evolutivas/&quot;&gt;Fausto de la Torre&lt;/a&gt; uploaded the &lt;a href=&quot;http://faustodelatog.wordpress.com/2014/10/06/arquitecturas-evolutivas/&quot;&gt;slides&lt;/a&gt; of the talk.
+&lt;br /&gt;&lt;br /&gt;
+DISCLAIMER: the slides are in Spanish. I’ll convert them into English and upload that version soon.&lt;/p&gt;
+
+  &lt;p&gt;&lt;a href=&quot;http://maria-gomez.me//talks/campus-party-quito-2014-evolutionary-architecture/&quot;&gt;Campus Party Quito 2014 - Evolutionary architecture&lt;/a&gt; was originally published by Maria Gomez at &lt;a href=&quot;http://maria-gomez.me/&quot;&gt;Continuous Learner&lt;/a&gt; on November 16, 2014.&lt;/p&gt;</content>
+</entry>
+
+
+<entry>
+  <title type="html"><![CDATA[Dropwizard and Flyway]]></title>
+  <link rel="alternate" type="text/html" href="http://maria-gomez.me//software/dropwizard-and-flyway/" />
+  <id>http://maria-gomez.me//software/dropwizard-and-flyway</id>
+  <updated>2014-06-26 00:50:08 -0400T00:00:00-00:00</updated>
+  <published>2014-06-25T00:00:00-04:00</published>
+  
+  <author>
+    <name>Maria Gomez</name>
+    <uri>http://maria-gomez.me/</uri>
+    <email>mariagomez.aguirre@gmail.com</email>
+  </author>
+  <content type="html">&lt;p&gt;In my current project we are developing a bunch of microservices using &lt;a href=&quot;dropwizard.github.io/dropwizard/&quot;&gt;Dropwizard&lt;/a&gt;, a light weight Java framework who provides you a quick way of creating RESTful services by combining some libraries like Jersey and Jackson.
+&lt;br /&gt;&lt;br /&gt;
+One of the reason why we chose it is because it gives you a lot of stuff out of the box (like &lt;a href=&quot;http://dropwizard.readthedocs.org/en/latest/manual/core.html#metrics&quot;&gt;Metrics&lt;/a&gt; and an embedded Jetty) but all the libraries are easily changeable if you want to use something different. In our case, we needed to manage the DB migrations but didn’t want to use Liquidbase, the library that came wih Dropwizard. So we looked around and picked &lt;a href=&quot;http://flywaydb.org&quot;&gt;Flyway&lt;/a&gt;, a lighter alternative. Migration scripts in Flyway are written in pure SQL so they are easy to understand and maintain.
+&lt;br /&gt;&lt;br /&gt;
+Flyway gives you three ways of configure your migrations: &lt;a href=&quot;http://flywaydb.org/documentation/commandline/&quot;&gt;Command Line Tool&lt;/a&gt;, &lt;a href=&quot;http://flywaydb.org/documentation/api/&quot;&gt;API&lt;/a&gt; that can be called from Java and a plugin for a few build tools like &lt;a href=&quot;http://flywaydb.org/documentation/maven/&quot;&gt;Maven&lt;/a&gt; and &lt;a href=&quot;http://flywaydb.org/documentation/gradle/&quot;&gt;Gradle&lt;/a&gt;. Initially for our project we opted to use the plugin for Gradle so we create our tasks like that:
+&lt;br /&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;    flyway {
+        def yamlConfig = new Yaml().load(new File(&#39;application-config.yml&#39;).newReader())
+        def dbConfig = yamlConfig.database
+
+        user = dbConfig.user
+        password = dbConfig.password
+        url = dbConfig.url
+    }
+
+    // Configure the run task to start the Dropwizard service
+    run {
+        dependsOn flywayMigrate
+        args &#39;server&#39;, &#39;servicio-usuario.yml&#39;
+    }
+    test {
+        dependsOn flywayMigrate
+        ....
+    }
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;By making the task run and test dependant of flyway we make sure the DB is in the correct stage every time we execute the application or run the tests. And although this is a great use fo flyway we soon understood that our app needed something different: we obviously need our production environment to run the migrations but we won’t have gradle in there so, what else can we do?
+&lt;br /&gt;&lt;br /&gt;
+This is when we decided to use the flyway API and call it from the code when the application starts up. I have a &lt;a href=&quot;https://gist.github.com/mariagomez/a0e1011bfb8b0cca0c9d&quot;&gt;gist&lt;/a&gt; that show how you can do it following some of Dropwizard practices. Basically, Dropwizard has this notion of &lt;a href=&quot;http://dropwizard.readthedocs.org/en/latest/manual/core.html#bundles&quot;&gt;bundles&lt;/a&gt; that can be attached to the app on start up. That is how you wire up your ORM and your IoC container. So for Flyway we created a custom bundle that connects to the database using the configuration details and run the migrations.
+&lt;br /&gt;&lt;/p&gt;
+
+&lt;pre&gt;&lt;code&gt;    public class DBMigrationsBundle implements ConfiguredBundle&amp;lt;HelloWorldConfiguration&amp;gt;{
+        @Override
+        public void run(HelloWorldConfiguration configuration, Environment environment) throws Exception {
+            Flyway flyway = new Flyway();
+            flyway.setDataSource(configuration.getDataSourceFactory().getUrl(),
+                                configuration.getDataSourceFactory().getUser(),
+                                configuration.getDataSourceFactory().getPassword());
+            flyway.migrate();
+        }
+
+        @Override
+        public void initialize(Bootstrap&amp;lt;?&amp;gt; bootstrap) {
+
+        }
+    }
+&lt;/code&gt;&lt;/pre&gt;
+
+&lt;p&gt;We are now sure that whatever environment we deploy the app, it will run the migrations.&lt;/p&gt;
+
+  &lt;p&gt;&lt;a href=&quot;http://maria-gomez.me//software/dropwizard-and-flyway/&quot;&gt;Dropwizard and Flyway&lt;/a&gt; was originally published by Maria Gomez at &lt;a href=&quot;http://maria-gomez.me/&quot;&gt;Continuous Learner&lt;/a&gt; on June 25, 2014.&lt;/p&gt;</content>
+</entry>
+
+
+<entry>
+  <title type="html"><![CDATA[Using Ghost as a blogging platform]]></title>
+  <link rel="alternate" type="text/html" href="http://maria-gomez.me//technology/using-ghost-as-a-blogging-platform/" />
+  <id>http://maria-gomez.me//technology/using-ghost-as-a-blogging-platform</id>
+  <updated>2014-06-04 17:03:06 -0400T00:00:00-00:00</updated>
+  <published>2014-06-04T00:00:00-04:00</published>
+  
+  <author>
+    <name>Maria Gomez</name>
+    <uri>http://maria-gomez.me/</uri>
+    <email>mariagomez.aguirre@gmail.com</email>
+  </author>
+  <content type="html">&lt;p&gt;A few months ago I started playing with &lt;a href=&quot;https://ghost.org/&quot;&gt;Ghost&lt;/a&gt; the blogging platform. I ended up not using it (I’m using &lt;a href=&quot;http://jekyllrb.com/&quot;&gt;Jekyll&lt;/a&gt; now) but I think this notes can be useful for people trying it out.
+&lt;br /&gt;&lt;br /&gt;
+The &lt;a href=&quot;http://docs.ghost.org/&quot;&gt;documentation&lt;/a&gt; section of the Ghost website is quite complete but I have found the articles at &lt;a href=&quot;http://www.howtoinstallghost.com/&quot;&gt;howtoinstallghost.com&lt;/a&gt; better at identifying problems and suggesting solutions.
+&lt;br /&gt;&lt;br /&gt;
+So, these are the steps I followed:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;
+    &lt;p&gt;Create a EC2 instance in AWS -&amp;gt; I followed this &lt;a href=&quot;http://www.howtoinstallghost.com/how-to-setup-an-amazon-ec2-instance-to-host-ghost-for-free-self-install/&quot;&gt;tutorial&lt;/a&gt; that shows how to install Ghost on an Amazon EC2 instance using the &lt;a href=&quot;http://aws.amazon.com/free/&quot;&gt;Free Tier&lt;/a&gt;. It was really easy to follow but I have a couple of things to note:&lt;/p&gt;
+
+    &lt;ul&gt;
+      &lt;li&gt;Everything needs to be done with &lt;code&gt;sudo&lt;/code&gt;&lt;/li&gt;
+      &lt;li&gt;You will need to use absolute paths to call &lt;a href=&quot;https://npmjs.org/&quot;&gt;npm&lt;/a&gt;. For instance: &lt;code&gt;/usr/local/bin/npm install&lt;/code&gt;&lt;/li&gt;
+      &lt;li&gt;There is &lt;a href=&quot;http://www.howtoinstallghost.com/how-to-setup-an-amazon-ec2-instance-to-host-ghost-for-free/&quot;&gt;another tutorial&lt;/a&gt; that uses a pre-build AMI with Ghost already installed. However that AMI doesn’t seem to be available anymore.
+&lt;br /&gt;&lt;br /&gt;&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;Now you have a Ghost instance running on the cloud but the moment you close the terminal or switch off your laptop the process will stop, so you need to figure out how to make Ghost run &lt;em&gt;forever&lt;/em&gt;. &lt;a href=&quot;http://www.howtoinstallghost.com/how-to-start-ghost-with-forever/&quot;&gt;This article&lt;/a&gt; will tell you how.&lt;/p&gt;
+
+    &lt;p&gt;When I first tried to run &lt;em&gt;forever&lt;/em&gt; the system couldn’t find node (even though I installed in the previous step). Thankfully I wasn’t the only one facing &lt;a href=&quot;http://www.howtoinstallghost.com/how-to-start-ghost-with-forever/#comment-216&quot;&gt;this&lt;/a&gt; problem and I solved it by reading &lt;a href=&quot;http://stackoverflow.com/questions/4976658/on-ec2-sudo-node-command-not-found-but-node-without-sudo-is-ok#answer-5062718&quot;&gt;this&lt;/a&gt; which just tell you how to link the missing files.&lt;/p&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;p&gt;Finally, make sure you have backup of your content. This &lt;a href=&quot;https://ghost.org/forum/using-ghost/1067-how-to-backup-ghost-content-data/&quot;&gt;article&lt;/a&gt; will tell you how.&lt;/p&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+
+  &lt;p&gt;&lt;a href=&quot;http://maria-gomez.me//technology/using-ghost-as-a-blogging-platform/&quot;&gt;Using Ghost as a blogging platform&lt;/a&gt; was originally published by Maria Gomez at &lt;a href=&quot;http://maria-gomez.me/&quot;&gt;Continuous Learner&lt;/a&gt; on June 04, 2014.&lt;/p&gt;</content>
+</entry>
+
+
+<entry>
+  <title type="html"><![CDATA[A Little Experiment]]></title>
+  <link rel="alternate" type="text/html" href="http://maria-gomez.me//general/a-little-experiment/" />
+  <id>http://maria-gomez.me//general/a-little-experiment</id>
+  <updated>2014-05-28 22:03:43 -0400T00:00:00-00:00</updated>
+  <published>2014-05-28T00:00:00-04:00</published>
+  
+  <author>
+    <name>Maria Gomez</name>
+    <uri>http://maria-gomez.me/</uri>
+    <email>mariagomez.aguirre@gmail.com</email>
+  </author>
+  <content type="html">&lt;figure&gt;
+    &lt;a href=&quot;http://maria-gomez.me//images/notebook.jpg&quot;&gt;&lt;img src=&quot;http://maria-gomez.me//images/notebook.jpg&quot; /&gt;&lt;/a&gt;
+    &lt;figcaption&gt;&lt;a href=&quot;http://maria-gomez.me//images/notebook.jpg&quot; title=&quot;My Notebook&quot;&gt;My Notebook&lt;/a&gt;.&lt;/figcaption&gt;
+&lt;/figure&gt;
+
+&lt;p&gt;This is my notepad. It has been with me for just over a year. It contains notes from the four different projects I have worked on in the last year at Thoughtworks as well as ramdon thoughts and ideas. From how to work with AngularJS on IE7 to defining my next year’s goals and everything in between.
+&lt;br /&gt;&lt;br /&gt;
+Now that it’s almost finished I want to tranfer all that knowledge into something more “durable”, hence I’ll be posting a lot of the stuff I have written there into this blog.
+&lt;br /&gt;&lt;br /&gt;
+To make things more interesting (or challenging) for the next month I will try to post something new every day. Let’s see how it goes….
+&lt;br /&gt;&lt;br /&gt;
+&lt;em&gt;DISCLAIMER:&lt;/em&gt; I will also post other things that are not in the notepad, like my essays and paper from the MA in Digital Media that I completed in 2012.&lt;/p&gt;
+
+  &lt;p&gt;&lt;a href=&quot;http://maria-gomez.me//general/a-little-experiment/&quot;&gt;A Little Experiment&lt;/a&gt; was originally published by Maria Gomez at &lt;a href=&quot;http://maria-gomez.me/&quot;&gt;Continuous Learner&lt;/a&gt; on May 28, 2014.&lt;/p&gt;</content>
+</entry>
+
+</feed>

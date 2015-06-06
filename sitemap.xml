@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc>http://maria-gomez.me/</loc>
+    </url>
+    
+    
+    <url>
+        <loc>http://maria-gomez.me//404.html</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//about/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//feed.xml</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//.htaccess</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//index.html</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//posts/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//sitemap.xml</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//theme-setup/</loc>
+    </url>
+    
+
+    
+    <url>
+        <loc>http://maria-gomez.me//software/how-to-log-audit-information-with-dropwizard/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//talks/divide-and-conquer-an-introduction-to-microservices/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//talks/divide-y-venceras-una-introduccion-a-los-microservices/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//talks/refactoring-workshop/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//talks/campus-party-quito-2014-evolutionary-architecture/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//software/dropwizard-and-flyway/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//technology/using-ghost-as-a-blogging-platform/</loc>
+    </url>
+    
+    <url>
+        <loc>http://maria-gomez.me//general/a-little-experiment/</loc>
+    </url>
+    
+</urlset>
